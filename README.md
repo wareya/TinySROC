@@ -2,6 +2,17 @@
 
 TinySROC is a tiny software-rasterized occlusion culling library, header-only, for C++17 and later.
 
+Demo screenshots:
+
+| None | High-res | Low-res |
+| - | - | - |
+| <img width="1280" height="720" alt="a_2026-06-23_08-39-07" src="https://github.com/user-attachments/assets/6fb47068-2c0c-464b-b84d-b533cef8e722" /> | <img width="1280" height="720" alt="a_2026-06-23_08-39-11" src="https://github.com/user-attachments/assets/55e1d351-15a0-42f6-98c0-f4f359d0ae92" /> | <img width="1280" height="720" alt="a_2026-06-23_08-39-14" src="https://github.com/user-attachments/assets/7d7c6cf2-d821-4820-9b04-da43a85ae9e4" /> |
+| <img width="1280" height="720" alt="a_2026-06-23_08-41-43" src="https://github.com/user-attachments/assets/ff89fe66-67d1-4ade-a804-e5cdfee665ae" /> | <img width="1280" height="720" alt="a_2026-06-23_08-41-45" src="https://github.com/user-attachments/assets/ad85222e-257a-47dc-9b23-9ac0e9fa8c88" /> | <img width="1280" height="720" alt="a_2026-06-23_08-41-46" src="https://github.com/user-attachments/assets/320a48ab-bba7-4d8f-85e8-33f4dc249857" /> |
+
+## Requirements
+
+A C++17 (or later) compiler and the GLM library. For the demo, SDL3 and SDL3_image, and if you're not on a C++20 compiler, fmtlib.
+
 ## Compile the demo
 
 Go to `demo/` in a terminal and run:
@@ -12,7 +23,7 @@ C++20 `clang++ -std=c++20 -O3 -g -ggdb demo2.cpp -static $(pkg-config sdl3 sdl3-
 
 ## API
 
-Include `<tinysroc.hpp>` in a SINGLE source file in your project, make a World object, and use its API:
+`#include` the `tinysroc.hpp` file in a SINGLE source file in your project, make a World object, and use its API:
 
 ```c++
 //////////////
