@@ -125,7 +125,7 @@ TinySROC is decently fast.
 
 TinySROC only over rasterizes at the resolution you tell it to, and it handles the changes to conservativeness at various resolutions correctly. Asking for a 256x128 depth buffer works well for most hardware, but 64x32 might be more appropriate for very weak hardware (e.g. old phones). Reducing the resolutino reduces the rasterization cost, but not the setup and triangle transformation cost. Reducing the number of active and live occluders, and putting less data into them, should also be investigated for low-spec hardware.
 
-Even on strong hardware, trimesh occluders (meant for terrain) shouldn't be fed to TinySROC at the original mesh detail level. You should subsample it to 1/4 or 1/16 the triangle count (1/2 or 1/4 the dimensions) with a min-pool or some other conservative terrain subsampling method, and make sure each terrain occluder has in the range of 500~2000 triangles (smaller is usually better), not 4000+.
+Even on strong hardware, trimesh occluders (meant for terrain) shouldn't be fed to TinySROC at the original mesh detail level. You should subsample it to 1/4 or 1/16 the triangle count (1/2 or 1/4 the dimensions) with a min-pool or some other conservative terrain subsampling method (the demo includes a high-quality one as an example), and make sure each terrain occluder has in the range of 500~2000 triangles (fewer is usually better), not 4000+.
 
 ## Copyright
 
