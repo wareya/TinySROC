@@ -129,6 +129,6 @@ Even on strong hardware, trimesh occluders (meant for terrain) shouldn't be fed 
 
 ## Copyright
 
-Licensed under the MIT license.
+Licensed under the MIT license, Copyright 2026 Wareya.
 
 Not AI slop.
