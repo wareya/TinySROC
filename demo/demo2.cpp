@@ -107,8 +107,7 @@ struct RenderableMesh {
         std::vector<vec3> _verts,
         std::vector<vec3> _normals,
         std::vector<uint32_t> _indexes,
-        uint32_t _texture
-    )
+        uint32_t _texture)
     {
         verts = _verts;
         normals = _normals;
@@ -332,7 +331,8 @@ int main()
         return hm_px[z*hm_pitch + x*4] * 0.35f;
     };
     
-    tinysroc::World occ_world;
+    auto occ_world = tinysroc::OccWorld::build();
+    tinysroc::OccWorldView occ_world_view(occ_world);
     
     std::vector<Renderable *> objects;
     
@@ -498,7 +498,7 @@ int main()
                     }
                 }
                 
-                auto occ = occ_world.add_occluder_trimesh_owned(
+                auto occ = occ_world->add_occluder_trimesh_owned(
                     (float *)verts2.data(), (float *)normals.data(), normals.size(),
                     (uint32_t *)occ_indexes.data(), occ_indexes.size() / 3
                 );
@@ -511,7 +511,7 @@ int main()
             if (true)
             {
                 auto occ = build_conservative_terrain_occluder();
-                occ_world.occluder_set_xform(occ, renderable->xform);
+                occ_world->occluder_set_xform(occ, renderable->xform);
                 occluders.push_back(occ);
             }
             
@@ -575,7 +575,7 @@ int main()
                 vec3(-size,  size, 0.0f),
             };
             
-            auto occ = occ_world.add_occluder_rectangle(&coords[0].x);
+            auto occ = occ_world->add_occluder_rectangle(&coords[0].x);
     
             x -= 0.5f;
             y -= 0.5f;
@@ -586,7 +586,7 @@ int main()
             renderable->xform = translate(renderable->xform, vec3(x, get_px_worldspace(x, y) + size, y));
             renderable->xform = rotate(renderable->xform, lcg() * 100.0f, vec3(0.0f, 1.0f, 0.0f));
             
-            occ_world.occluder_set_xform(occ, renderable->xform);
+            occ_world->occluder_set_xform(occ, renderable->xform);
             occluders.push_back(occ);
             
             objects.push_back(renderable);
@@ -648,7 +648,7 @@ int main()
                 vec3( size+size,  size+size, 0.0f),
             };
             
-            auto occ = occ_world.add_occluder_triangles(&coords[0].x, 2);
+            auto occ = occ_world->add_occluder_triangles(&coords[0].x, 2);
             
             x -= 0.5f;
             y -= 0.5f;
@@ -659,7 +659,7 @@ int main()
             renderable->xform = translate(renderable->xform, vec3(x, get_px_worldspace(x, y) + size, y));
             renderable->xform = rotate(renderable->xform, lcg() * 100.0f, vec3(0.0f, 1.0f, 0.0f));
             
-            occ_world.occluder_set_xform(occ, renderable->xform);
+            occ_world->occluder_set_xform(occ, renderable->xform);
             occluders.push_back(occ);
             
             objects.push_back(renderable);
@@ -955,7 +955,7 @@ int main()
         
         mat4 vp = proj * view;
         if (occ_enabled)
-            occ_world.set_perspective_camera(proj, view);
+            occ_world_view.set_perspective_camera(proj, view);
         
         if (occ_enabled)
         {
@@ -968,16 +968,16 @@ int main()
             }
             for (auto occ : occluders)
             {
-                vec3 a = occ_world.occluder_get_center(occ);
+                vec3 a = occ_world->occluder_get_center(occ);
                 vec3 b = -pos;
                 float dist = length(a-b);
                 if (dist < cw * 2.5f)
-                    occ_world.occluder_enable(occ);
+                    occ_world->occluder_enable(occ);
                 else
-                    occ_world.occluder_disable(occ);
+                    occ_world->occluder_disable(occ);
             }
             t_debug_01 = SDL_GetTicksNS();
-            occ_world.rasterize(occ_w, occ_h, occ_w, 0);
+            occ_world_view.rasterize(occ_w, occ_h, occ_w, 0);
             t_debug_02 = SDL_GetTicksNS();
             if (occ_debug)
             {
@@ -988,7 +988,7 @@ int main()
                     for (int x = 0; x < occ_w; x++)
                     {
                         float d = 0.0f;
-                        memcpy(&d, &occ_world.hires[y*occ_w + x], 4);
+                        memcpy(&d, &occ_world_view.hires[y*occ_w + x], 4);
                         if (d != 0.0f) d = d*0.5f + 0.5f;
                         uint8_t c = clamp(round(d*255.0f), 0.0f, 255.0f);
                         opixbuf[(y*occ_w + x)*4 + 0] = c;
@@ -1051,7 +1051,7 @@ int main()
                 continue;
             auto lo = obj->mesh->aabb_mid.xyz() - obj->mesh->aabb_ext;
             auto hi = lo + obj->mesh->aabb_ext*2.0f;
-            if (occ_enabled && occ_world.occluder_aabb_query(lo, hi, obj->xform))
+            if (occ_enabled && occ_world_view.query_aabb(lo, hi, obj->xform))
                 continue;
             
             sorted_objs.push_back(obj);

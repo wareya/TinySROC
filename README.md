@@ -23,9 +23,12 @@ C++20 `clang++ -std=c++20 -O3 -g -ggdb demo2.cpp -static $(pkg-config sdl3 sdl3-
 
 ## API
 
-`#include` the `tinysroc.hpp` file in a SINGLE source file in your project, make a World object, and use its API:
+`#include` the `tinysroc.hpp` file in a SINGLE source file in your project, make a OccWorld object and an OccWorldView object, and use the API:
 
 ```c++
+struct OccWorld {
+    // constructed as a shared_ptr via OccWorld::build()
+    
 //////////////
 // World setup
 //////////////
@@ -51,16 +54,27 @@ C++20 `clang++ -std=c++20 -O3 -g -ggdb demo2.cpp -static $(pkg-config sdl3 sdl3-
 //////////////
 // World management
 //////////////
-
+    
     void occluder_enable(uint64_t id)
     void occluder_disable(uint64_t id)
     void occluder_remove(uint64_t id)
     void occluder_set_xform(uint64_t id, Mat4 xform)
+    
+//////////////
+// Feedback/debug
+//////////////
+    
+    size_t occluder_tricount(uint64_t id)
+    Vec3 occluder_get_center(uint64_t id)
+};
 
+struct OccWorldView {
+    // constructed as OccWorldView(my_OccWorld_shared_ptr)
+    
 //////////////
 // Main API
 //////////////
-
+    
     /// Sets up camera matrices.
     ///
     /// Projection matrix must follow the coordinate system used by glm::perspectiveLH_ZO.
@@ -91,7 +105,7 @@ C++20 `clang++ -std=c++20 -O3 -g -ggdb demo2.cpp -static $(pkg-config sdl3 sdl3-
 //////////////
 // Query 
 //////////////
-
+    
     /// Returns true if 2d AABB is fully occluded. AABB values are normalized from 0.0 to 1.0 across screen bounds.
     ///
     /// May return false even if the AABB is technically occluded.
@@ -100,13 +114,7 @@ C++20 `clang++ -std=c++20 -O3 -g -ggdb demo2.cpp -static $(pkg-config sdl3 sdl3-
     
     bool query_rect(float _x0, float _y0, float _x1, float _y1, float near_distance)
     bool query_aabb(Vec3 lo, Vec3 hi, Mat4 xform)
-    
-//////////////
-// Feedback/debug
-//////////////
-
-    size_t occluder_tricount(uint64_t id)
-    Vec3 occluder_get_center(uint64_t id)
+};
 ```
 
 ## Design

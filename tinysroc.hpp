@@ -121,8 +121,6 @@ void occ_free(Occluder & occ)
     }
 }
 
-struct World;
-
 namespace _tsroc_private {
     static void _write_depth(size_t i, float z, uint32_t * output);
     static void _rasterize_scanline(int pitch, int w, int h, size_t y, Vec3 x1, Vec3 x2, uint32_t * output,
@@ -142,19 +140,13 @@ namespace _tsroc_private {
         );
 }
 
-struct World {
-    uint32_t lowres_w;
-    uint32_t lowres_h;
-    std::vector<uint32_t> hires;
-    std::vector<uint32_t> lowres;
-    
-    Mat4 xform_proj = Mat4(1.0f);
-    Mat4 xform_view = Mat4(1.0f);
-    
+struct OccWorld {
+    static std::shared_ptr<OccWorld> build()
+    {
+        return std::make_shared<OccWorld>();
+    }
+    friend struct OccWorldView;
 private:
-    uint32_t w;
-    uint32_t h;
-    
     std::unordered_map<uint64_t, Occluder> occluders;
     std::unordered_map<uint64_t, Occluder> occluders_disabled;
     
@@ -171,14 +163,7 @@ private:
         return next_id++;
     }
     
-    int lr_ratio = 8;
 public:
-    void set_lowres_ratio(int r)
-    {
-        if (r < 1) r = 1;
-        if (r > 32) r = 32;
-    }
-    
     /// You should use this *only* for occluders that are extremely unlikely to ever let you see their "naked edges".
     /// For example, terrain chunks from an open world.
     /// The conservative nudge on these is normals-based, not edge-based.
@@ -369,7 +354,112 @@ public:
         return Vec3(0.0f);
     }
     
+public:
+    ~OccWorld()
+    {
+        for (auto & _occ : occluders)
+        {
+            auto & occ = _occ.second;
+            occ_free(occ);
+        }
+    }
+};
+
+struct OccWorldView {
+    OccWorldView(std::shared_ptr<OccWorld> _world)
+    {
+        world = _world;
+    }
+    
+    bool _occluder_rect_query_allow_hr_fallback = true;
+    /// Returns true if 2d AABB is fully occluded. AABB values are normalized from 0.0 to 1.0 across screen bounds.
+    ///
+    /// May return false even if the AABB is technically occluded.
+    ///
+    /// near_distance must be in forwards (not radial) world units from the origin of the camera (not the near plane).
+    bool query_rect(float _x0, float _y0, float _x1, float _y1, float near_distance)
+    {
+        _x0 = clamp(_x0, 0.0f, 1.0f);
+        _x1 = clamp(_x1, 0.0f, 1.0f);
+        _y0 = clamp(_y0, 0.0f, 1.0f);
+        _y1 = clamp(_y1, 0.0f, 1.0f);
+        if (_occluder_rect_query_allow_hr_fallback && hires_owned)
+        {
+            int hrw = int(_x1 * w + 1.0f) - int(_x0 * w);
+            int hrh = int(_y1 * h + 1.0f) - int(_y0 * h);
+            if (hrw * hrh <= 16*16)
+                return occluder_rect_query_hires(_x0, _y0, _x1, _y1, near_distance);
+        }
+        
+        int x0 = _x0 * lowres_w;
+        int x1 = ceil(_x1 * lowres_w);
+        int y0 = _y0 * lowres_h;
+        int y1 = ceil(_y1 * lowres_h);
+        x0 = x0 < 0 ? 0 : x0 >= (int32_t)lowres_w ? lowres_w-1 : x0;
+        x1 = x1 < 0 ? 0 : x1 >= (int32_t)lowres_w ? lowres_w-1 : x1;
+        y0 = y0 < 0 ? 0 : y0 >= (int32_t)lowres_h ? lowres_h-1 : y0;
+        y1 = y1 < 0 ? 0 : y1 >= (int32_t)lowres_h ? lowres_h-1 : y1;
+        if (x0 > x1) x0 = x1;
+        if (y0 > y1) y0 = y1;
+        
+        float inv_near_distance = 1.0 / near_distance;
+        
+        for (size_t y = y0; y <= (size_t)y1; y++)
+        {
+            for (size_t x = x0; x <= (size_t)x1; x++)
+            {
+                if (inv_near_distance >= _lr_float_at(x, y))
+                    return false;
+            }
+        }
+        return true;
+    }
+    
+    bool query_aabb(Vec3 lo, Vec3 hi, Mat4 xform)
+    {
+        bool any_in_front = false;
+        float inf = 1.0f/0.0f;
+        Vec2 lo2 = Vec2(inf, inf);
+        Vec2 hi2 = Vec2(-inf, -inf);
+        float lo_depth = inf;
+        auto mvp = camera * xform;
+        for (int i = 0; i < 8; i++)
+        {
+            Vec4 vert = Vec4(((i&1) ? lo : hi).x, ((i&2) ? lo : hi).y, ((i&4) ? lo : hi).z, 1.0f);
+            vert = mvp * vert;
+            if (vert.w > 1e-37f)
+                any_in_front = true;
+            else
+                vert.w = 1e-37f;
+            
+            float loz = vert.w;
+            lo_depth = min(lo_depth, loz);
+            
+            vert *= 1.0f / vert.w;
+            
+            vert.x = vert.x * 0.5f + 0.5f;
+            vert.y = vert.y * 0.5f + 0.5f;
+            vert.y = 1.0f - vert.y;
+            
+            lo2 = min(lo2, vert.xy());
+            hi2 = max(hi2, vert.xy());
+        }
+        
+        if (!any_in_front) return false;
+        
+        return query_rect(lo2.x, lo2.y, hi2.x, hi2.y, lo_depth);
+    }
+    
 private:
+    int lr_ratio = 8;
+    
+public:
+    void set_lowres_ratio(int r)
+    {
+        if (r < 1) r = 1;
+        if (r > 32) r = 32;
+    }
+    
     float _hr_float_at(int x, int y)
     {
         auto & p = hires[y * w + x];
@@ -411,94 +501,18 @@ private:
         return f;
     }
     
+    std::shared_ptr<OccWorld> world;
+    uint32_t w;
+    uint32_t h;
+    
 public:
-    bool _occluder_rect_query_allow_hr_fallback = true;
-    /// Returns true if 2d AABB is fully occluded. AABB values are normalized from 0.0 to 1.0 across screen bounds.
-    ///
-    /// May return false even if the AABB is technically occluded.
-    ///
-    /// near_distance must be in forwards (not radial) world units from the origin of the camera (not the near plane).
-    bool occluder_rect_query(float _x0, float _y0, float _x1, float _y1, float near_distance)
-    {
-        _x0 = clamp(_x0, 0.0f, 1.0f);
-        _x1 = clamp(_x1, 0.0f, 1.0f);
-        _y0 = clamp(_y0, 0.0f, 1.0f);
-        _y1 = clamp(_y1, 0.0f, 1.0f);
-        if (_occluder_rect_query_allow_hr_fallback && hires_owned)
-        {
-            int hrw = int(_x1 * w + 1.0f) - int(_x0 * w);
-            int hrh = int(_y1 * h + 1.0f) - int(_y0 * h);
-            if (hrw * hrh <= 16*16)
-                return occluder_rect_query_hires(_x0, _y0, _x1, _y1, near_distance);
-        }
-        
-        int x0 = _x0 * lowres_w;
-        int x1 = ceil(_x1 * lowres_w);
-        int y0 = _y0 * lowres_h;
-        int y1 = ceil(_y1 * lowres_h);
-        x0 = x0 < 0 ? 0 : x0 >= (int32_t)lowres_w ? lowres_w-1 : x0;
-        x1 = x1 < 0 ? 0 : x1 >= (int32_t)lowres_w ? lowres_w-1 : x1;
-        y0 = y0 < 0 ? 0 : y0 >= (int32_t)lowres_h ? lowres_h-1 : y0;
-        y1 = y1 < 0 ? 0 : y1 >= (int32_t)lowres_h ? lowres_h-1 : y1;
-        if (x0 > x1) x0 = x1;
-        if (y0 > y1) y0 = y1;
-        
-        float inv_near_distance = 1.0 / near_distance;
-        
-        for (size_t y = y0; y <= (size_t)y1; y++)
-        {
-            for (size_t x = x0; x <= (size_t)x1; x++)
-            {
-                if (inv_near_distance >= _lr_float_at(x, y))
-                    return false;
-            }
-        }
-        return true;
-    }
+    uint32_t lowres_w;
+    uint32_t lowres_h;
+    std::vector<uint32_t> hires;
+    std::vector<uint32_t> lowres;
     
-    bool occluder_aabb_query(Vec3 lo, Vec3 hi, Mat4 xform)
-    {
-        bool any_in_front = false;
-        float inf = 1.0f/0.0f;
-        Vec2 lo2 = Vec2(inf, inf);
-        Vec2 hi2 = Vec2(-inf, -inf);
-        float lo_depth = inf;
-        auto mvp = camera * xform;
-        for (int i = 0; i < 8; i++)
-        {
-            Vec4 vert = Vec4(((i&1) ? lo : hi).x, ((i&2) ? lo : hi).y, ((i&4) ? lo : hi).z, 1.0f);
-            vert = mvp * vert;
-            if (vert.w > 1e-37f)
-                any_in_front = true;
-            else
-                vert.w = 1e-37f;
-            
-            float loz = vert.w;
-            lo_depth = min(lo_depth, loz);
-            
-            vert *= 1.0f / vert.w;
-            
-            vert.x = vert.x * 0.5f + 0.5f;
-            vert.y = vert.y * 0.5f + 0.5f;
-            vert.y = 1.0f - vert.y;
-            
-            lo2 = min(lo2, vert.xy());
-            hi2 = max(hi2, vert.xy());
-        }
-        
-        if (!any_in_front) return false;
-        
-        return occluder_rect_query(lo2.x, lo2.y, hi2.x, hi2.y, lo_depth);
-    }
-    
-    ~World()
-    {
-        for (auto & _occ : occluders)
-        {
-            auto & occ = _occ.second;
-            occ_free(occ);
-        }
-    }
+    Mat4 xform_proj = Mat4(1.0f);
+    Mat4 xform_view = Mat4(1.0f);
     
     void update_lowres(uint32_t * hr_output, int w, int h, int hr_pitch)
     {
@@ -548,7 +562,6 @@ public:
 private:
     std::vector<Occluder *> occ_sorted;
     bool hires_owned = false;
-    
     
 public:
     
@@ -601,7 +614,7 @@ public:
         Vec4 planes[6] = { fm_l, fm_r, fm_b, fm_u, fm_n, fm_f };
         
         occ_sorted.clear();
-        for (auto & _occ : occluders)
+        for (auto & _occ : world->occluders)
         {
             auto & occ = _occ.second;
             
@@ -650,7 +663,7 @@ public:
         {
             auto & occ = *_occ;
             
-            if (lowres_updated && occluder_aabb_query(occ.aabb_mid.xyz() - occ.aabb_ext, occ.aabb_mid.xyz() + occ.aabb_ext, occ.xform))
+            if (lowres_updated && query_aabb(occ.aabb_mid.xyz() - occ.aabb_ext, occ.aabb_mid.xyz() + occ.aabb_ext, occ.xform))
                 continue;
             
             auto process_poly = [&](
