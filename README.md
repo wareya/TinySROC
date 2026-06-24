@@ -1,6 +1,6 @@
 # TinySROC
 
-TinySROC is a tiny software-rasterized occlusion culling library, header-only, for C++17 and later.
+TinySROC is a tiny software-rasterized occlusion culling library, header-only, for C++17 and later. MIT license.
 
 Demo screenshots:
 
@@ -137,6 +137,6 @@ Even on strong hardware, trimesh occluders (meant for terrain) shouldn't be fed 
 
 ## Copyright
 
-Licensed under the MIT license, Copyright 2026 Wareya.
+Licensed under the MIT license, Copyright 2026 Wareya. Applies to files other than the glad/khr files under the demo folder.
 
 Not AI slop.
