@@ -8,17 +8,20 @@
 #include <cstring>
 #include <algorithm> // for std::fill
 #include <cstdlib>
+#include <limits>
 #include <bit>
 
+#ifndef TINYSCOR_NO_INCLUDE_GLM
 #define GLM_FORCE_SWIZZLE
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
-
-using namespace glm;
+#endif
 
 #ifdef TINYSROC_NAMESPACED
 namespace tinysroc {
 #endif
+
+using namespace glm;
 
 // clean up some common macro pollution if needed
 #ifdef near
@@ -28,11 +31,13 @@ namespace tinysroc {
 #undef far
 #endif
 
+#ifndef TINYSCOR_NO_INCLUDE_GLM
 typedef vec2 Vec2;
 typedef vec3 Vec3;
 typedef vec4 Vec4;
 typedef mat4 Mat4;
 typedef mat3 Mat3;
+#endif
 
 #if __cplusplus >= 202002L
 // c++20
@@ -91,6 +96,17 @@ struct Occluder {
     Vec4 aabb_mid;
     Vec3 aabb_ext;
     
+    Occluder()
+    {
+        kind = 0;
+        conservative = true;
+        backface_cull = true;
+        xform = Mat4(1.0f);
+        aabb_mid = Vec4(0.0f);
+        aabb_ext = Vec3(0.0f);
+        mesh = {};
+    }
+    
     union {
         Trimesh mesh;
         Rect rect;
@@ -98,30 +114,30 @@ struct Occluder {
     };
 };
 
-void occ_free(Occluder & occ)
-{
-    if (occ.kind == 0) // trimesh
+namespace _tsroc_private {
+    static void _occ_free(Occluder & occ)
     {
-        if (occ.mesh.owned && occ.mesh.verts != 0)
+        if (occ.kind == 0) // trimesh
         {
-            TINYSROC_FREE(occ.mesh.verts);
-            TINYSROC_FREE(occ.mesh.verts_mm);
-            TINYSROC_FREE(occ.mesh.indexes);
-            occ.mesh.verts = 0;
-            occ.mesh.verts_mm = 0;
-            occ.mesh.indexes = 0;
+            if (occ.mesh.owned && occ.mesh.verts != 0)
+            {
+                TINYSROC_FREE(occ.mesh.verts);
+                TINYSROC_FREE(occ.mesh.verts_mm);
+                TINYSROC_FREE(occ.mesh.indexes);
+                occ.mesh.verts = 0;
+                occ.mesh.verts_mm = 0;
+                occ.mesh.indexes = 0;
+            }
+        }
+        else if (occ.kind == 2 && occ.list.verts != 0) // triangle list
+        {
+            TINYSROC_FREE(occ.list.verts);
+            TINYSROC_FREE(occ.list.verts_mm);
+            occ.list.verts = 0;
+            occ.list.verts_mm = 0;
         }
     }
-    else if (occ.kind == 2 && occ.list.verts != 0) // triangle list
-    {
-        TINYSROC_FREE(occ.list.verts);
-        TINYSROC_FREE(occ.list.verts_mm);
-        occ.list.verts = 0;
-        occ.list.verts_mm = 0;
-    }
-}
 
-namespace _tsroc_private {
     static void _write_depth(size_t i, float z, uint32_t * output);
     static void _rasterize_scanline(int pitch, int w, int h, size_t y, Vec3 x1, Vec3 x2, uint32_t * output,
         int32_t skip_xstart = 0, int32_t skip_xend = 0);
@@ -173,7 +189,7 @@ public:
         Vec3 * verts = (Vec3 *)TINYSROC_MALLOC(vertex_count * sizeof(Vec3) * 2);
         Vec4 * verts_mm = (Vec4 *)TINYSROC_MALLOC(vertex_count * sizeof(Vec4));
         uint32_t * indexes = (uint32_t *)TINYSROC_MALLOC(triangle_count * 3 * sizeof(uint32_t));
-        float inf = 1.0f/0.0f;
+        float inf = std::numeric_limits<float>::infinity();
         Vec3 aabb_lo = Vec3(inf, inf, inf);
         Vec3 aabb_hi = Vec3(-inf, -inf, -inf);
         for (size_t i = 0; i < vertex_count; i += 1)
@@ -196,7 +212,7 @@ public:
         Occluder occ;
         occ.kind = 0;
         occ.conservative = true;
-        occ.backface_cull = true;
+        occ.backface_cull = false; // TODO: configurable
         occ.xform = Mat4(1.0f);
         occ.aabb_mid = aabb_mid;
         occ.aabb_ext = aabb_ext;
@@ -251,7 +267,7 @@ public:
     {
         Vec3 * verts = (Vec3 *)TINYSROC_MALLOC(triangle_count * 3 * sizeof(Vec3));
         Vec4 * verts_mm = (Vec4 *)TINYSROC_MALLOC(triangle_count * 3 * sizeof(Vec4));
-        float inf = 1.0f/0.0f;
+        float inf = std::numeric_limits<float>::infinity();
         Vec3 aabb_lo = Vec3(inf, inf, inf);
         Vec3 aabb_hi = Vec3(-inf, -inf, -inf);
         for (size_t i = 0; i < triangle_count * 3; i += 1)
@@ -304,14 +320,14 @@ public:
         if (occluders.count(id))
         {
             auto & occ = occluders.at(id);
-            occ_free(occ);
+            _tsroc_private::_occ_free(occ);
             occluders.erase(id);
             deleted_ids.push_back(id);
         }
         else if (occluders_disabled.count(id))
         {
             auto & occ = occluders_disabled.at(id);
-            occ_free(occ);
+            _tsroc_private::_occ_free(occ);
             occluders_disabled.erase(id);
             deleted_ids.push_back(id);
         }
@@ -360,7 +376,7 @@ public:
         for (auto & _occ : occluders)
         {
             auto & occ = _occ.second;
-            occ_free(occ);
+            _tsroc_private::_occ_free(occ);
         }
     }
 };
@@ -418,7 +434,7 @@ struct OccWorldView {
     bool query_aabb(Vec3 lo, Vec3 hi, Mat4 xform)
     {
         bool any_in_front = false;
-        float inf = 1.0f/0.0f;
+        float inf = std::numeric_limits<float>::infinity();
         Vec2 lo2 = Vec2(inf, inf);
         Vec2 hi2 = Vec2(-inf, -inf);
         float lo_depth = inf;
@@ -445,7 +461,7 @@ struct OccWorldView {
             hi2 = max(hi2, vert.xy());
         }
         
-        if (!any_in_front) return false;
+        if (!any_in_front) return true;
         
         return query_rect(lo2.x, lo2.y, hi2.x, hi2.y, lo_depth);
     }
@@ -514,11 +530,11 @@ public:
     Mat4 xform_proj = Mat4(1.0f);
     Mat4 xform_view = Mat4(1.0f);
     
-    void update_lowres(uint32_t * hr_output, int w, int h, int hr_pitch)
+    void update_lowres(uint32_t * hr_output, int _w, int _h, int hr_pitch)
     {
-        (void)w;
+        (void)_w;
         std::fill(lowres.begin(), lowres.end(), ~0);
-        for (int y = 0; y < h; y += 1)
+        for (int y = 0; y < _h; y += 1)
         {
             auto yi2 = hr_pitch * y;
             auto yi = lowres_w * (y / lr_ratio);
@@ -538,11 +554,11 @@ public:
 private:
     Mat4 proj = Mat4(1.0f);
     Mat4 view = Mat4(1.0f);
-    Mat4 camera = Mat4(1.0f);
     float near = 0.01f;
     float far = 1000.0f;
     
 public:
+    Mat4 camera = Mat4(1.0f);
     /// Sets up camera matrices.
     ///
     /// Projection matrix must follow the coordinate system used by glm::perspectiveLH_ZO.
@@ -557,6 +573,18 @@ public:
 
         near = -m32 / m22;
         far  = m32 / (1.0f - m22);
+    }
+    void set_orthographic_camera(Mat4 projection, Mat4 view_pos_and_orientation)
+    {
+        proj = projection;
+        view = view_pos_and_orientation;
+        camera = proj * view;
+        
+        float m22 = proj[2][2];
+        float m32 = proj[3][2];
+
+        near = -m32 / m22;
+        far  = (1.0f - m32) / m22;
     }
     
 private:
@@ -580,19 +608,19 @@ public:
     /// After running, this->lowres contains an 8x8 min-pooled downres'd version of output. Because of
     ///  the reciprocal format, this means the furthest pixel of each 8x8 block is chosen to represent
     ///  the entire 8x8 block, not the nearest, despite being a min-pool.
-    void rasterize_to(int & w, int & h, int pitch, uint32_t * output, uint32_t framenum)
+    void rasterize_to(int & w_, int & h_, int pitch, uint32_t * output, uint32_t framenum)
     {
         hires_owned = false;
         (void)framenum;
         
-        w = w & ~15;
-        h = h & ~15;
-        if (w == 0 || h == 0) return;
+        w_ = w_ & ~15;
+        h_ = h_ & ~15;
+        if (w_ == 0 || h_ == 0) return;
         
         auto farnearval = (far - near) / far;
         
-        auto xnudge = (3.5f / (float)w);
-        auto ynudge = (3.5f / (float)h);
+        auto xnudge = (3.5f / (float)w_);
+        auto ynudge = (3.5f / (float)h_);
         
         auto cm = camera;
         
@@ -641,10 +669,8 @@ public:
             return q1.z > q2.z;
         });
         
-        auto & lowres = this->lowres;
-        
-        auto lr_w = max(1, w/lr_ratio);
-        auto lr_h = max(1, (h + (lr_ratio-1))/lr_ratio);
+        auto lr_w = max(1, w_/lr_ratio);
+        auto lr_h = max(1, (h_ + (lr_ratio-1))/lr_ratio);
         lowres.resize(lr_w * lr_h);
         std::fill(lowres.begin(), lowres.end(), ~0);
         lowres_w = lr_w;
@@ -672,7 +698,10 @@ public:
                 bool * fudges)
             {
                 for (int i = 0; i < verts_n; i++)
-                    { verts[i].x *= 1.0f / verts[i].w; verts[i].y *= 1.0f / verts[i].w; }
+                {
+                    verts[i].x *= 1.0f / verts[i].w;
+                    verts[i].y *= 1.0f / verts[i].w;
+                }
                 
                 if (backface_cull)
                 {
@@ -707,15 +736,15 @@ public:
                 // convert clip/ndc space to screen space
                 for (int i = 0; i < verts_n; i++)
                 {
-                    verts[i].x = (verts[i].x * 0.5f + 0.5f) * (float)w;
-                    verts[i].y = (1.0 - (verts[i].y * 0.5f + 0.5f)) * float(h);
+                    verts[i].x = (verts[i].x * 0.5f + 0.5f) * (float)w_;
+                    verts[i].y = (1.0 - (verts[i].y * 0.5f + 0.5f)) * float(h_);
                 }
                 
                 size_t tri_n_threshold = 512;
                 _tri_n += 1;
                 if (_tri_n == tri_n_threshold || _tri_n == tri_n_threshold * 4)
                 {
-                    update_lowres(output, w, h, pitch);
+                    update_lowres(output, w_, h_, pitch);
                     lowres_updated = true;
                 }
                 
@@ -730,7 +759,10 @@ public:
                 
                 std::array<std::array<Vec2, 2>, 4> edges;
                 for (int i = 0; i < edges_n; i++)
-                    edges[i] = {verts[i], verts[(i+1)%verts_n]};
+                {
+                    edges[i][0] = verts[i].xy();
+                    edges[i][1] = verts[(i+1)%verts_n].xy();
+                }
                 
                 for (int i = 0; i < edges_n; i++)
                 {
@@ -742,11 +774,11 @@ public:
                     edges[i][1] -= x2*0.72f;
                 }
                 
-                _tsroc_private::_rasterize_poly(verts[0].xyz(), normal, edges, edges_n, output, w, h, pitch);
+                _tsroc_private::_rasterize_poly(verts[0].xyz(), normal, edges, edges_n, output, w_, h_, pitch);
             };
             
             auto mvp = camera * occ.xform;
-            auto xlate = translate(Mat4(1.0f), vec3(1.0f/w, 1.0f/h, 0.0f));
+            auto xlate = translate(Mat4(1.0f), vec3(1.0f/w_, 1.0f/h_, 0.0f));
             mvp = xlate * mvp;
             
             auto handle_triangle = [&](Vec4 a, Vec4 b, Vec4 c, bool conservative)
@@ -762,9 +794,9 @@ public:
                     t = ref + t_v * t_t;
                     
                     std::array<Vec4, 3> v = {ref, s, t};
-                    std::array<bool, 3> b = {conservative, false, conservative};
+                    std::array<bool, 3> f = {conservative, false, conservative};
                     
-                    process_poly(&v[0], 3, occ.backface_cull, &b[0]);
+                    process_poly(&v[0], 3, occ.backface_cull, &f[0]);
                 };
                 auto apply_1cut = [&](auto ref1, auto ref2, auto t)
                 {
@@ -776,9 +808,9 @@ public:
                     auto t2a = ref2 + tv2 * t_t2;
                     
                     std::array<Vec4, 4> v = {ref1, ref2, t2a, t1a};
-                    std::array<bool, 4> b = {conservative, conservative, false, conservative};
+                    std::array<bool, 4> f = {conservative, conservative, false, conservative};
                     
-                    process_poly(&v[0], 4, occ.backface_cull, &b[0]);
+                    process_poly(&v[0], 4, occ.backface_cull, &f[0]);
                 };
                 
                 // triangle is fully behind camera
@@ -788,9 +820,9 @@ public:
                 if (a.z > clipdist && b.z > clipdist && c.z > clipdist)
                 {
                     std::array<Vec4, 3> v = {a, b, c};
-                    std::array<bool, 3> b = {conservative, conservative, conservative};
+                    std::array<bool, 3> f = {conservative, conservative, conservative};
                     
-                    process_poly(&v[0], 3, occ.backface_cull, &b[0]);
+                    process_poly(&v[0], 3, occ.backface_cull, &f[0]);
                 }
                 // various amounts of partial cut
                 else if (a.z <= clipdist && b.z <= clipdist)
@@ -957,23 +989,23 @@ public:
                 }
             }
         }
-        update_lowres(output, w, h, pitch);
+        update_lowres(output, w_, h_, pitch);
     }
     /// Rasterize the world to the `hires` field. See rasterize_to for behavioral details.
     ///
     /// The output IS CLEARED before rasterizing.
-    void rasterize(int & w, int & h, int pitch, uint32_t framenum)
+    void rasterize(int & _w, int & _h, int pitch, uint32_t framenum)
     {
-        w = w & ~15;
-        h = h & ~15;
-        if (w == 0 || h == 0) return;
+        _w = _w & ~15;
+        _h = _h & ~15;
+        if (_w == 0 || _h == 0) return;
         
-        this->w = w;
-        this->h = h;
-        hires.resize(w * h);
-        hires.assign(w * h, 0);
+        this->w = _w;
+        this->h = _h;
+        hires.resize(_w * _h);
+        hires.assign(_w * _h, 0);
         
-        rasterize_to(w, h, pitch, hires.data(), framenum);
+        rasterize_to(_w, _h, pitch, hires.data(), framenum);
         hires_owned = true;
         
         //auto & lowres = this->lowres;

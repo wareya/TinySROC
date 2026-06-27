@@ -13,6 +13,7 @@
 #include <sstream>
 #include <charconv>
 #include <algorithm>
+#include <mutex>
 
 #include "glad.h"
 #include "glad.c"
@@ -346,46 +347,6 @@ int main()
     {
         for (int gx = 0; gx < hm_w; gx += cw)
         {
-            std::vector<vec3> verts;
-            std::vector<vec3> normals;
-            std::vector<uint32_t> indices;
-            
-            for (int _z = 0; _z <= cw; _z++)
-            {
-                int z = gz + _z;
-                for (int _x = 0; _x <= cw; _x++)
-                {
-                    int x = gx + _x;
-                    auto get_vert = [&](int xd, int zd)
-                    {
-                        float y = get_px(x+xd, z+zd);
-                        return vec3(_x+xd, y, _z+zd);
-                    };
-                    verts.push_back(get_vert(0, 0));
-                    
-                    vec3 u = get_vert(0, 0-1);
-                    vec3 d = get_vert(0, 0+1);
-                    vec3 l = get_vert(0-1, 0);
-                    vec3 r = get_vert(0+1, 0);
-                    
-                    vec3 a = u-d;
-                    vec3 b = l-r;
-                    vec3 n = normalize(cross(a, b));
-                    normals.push_back(n);
-                }
-            }
-            for (int z = 0; z < cw; z++)
-            {
-                for (int x = 0; x < cw; x++)
-                {
-                    indices.push_back(z*(cw+1) + x);
-                    indices.push_back(z*(cw+1) + x + 1);
-                    indices.push_back(z*(cw+1) + x + 2 + cw);
-                    indices.push_back(z*(cw+1) + x);
-                    indices.push_back(z*(cw+1) + x + 2 + cw);
-                    indices.push_back(z*(cw+1) + x + 1 + cw);
-                }
-            }
             
             // There are three alternatives:
             // 1) Build a low-res version, but with a source-wise min-pool to push everything down to the local minimum.
@@ -504,6 +465,46 @@ int main()
                 );
                 return occ;
             };
+            std::vector<vec3> verts;
+            std::vector<vec3> normals;
+            std::vector<uint32_t> indices;
+            
+            for (int _z = 0; _z <= cw; _z++)
+            {
+                int z = gz + _z;
+                for (int _x = 0; _x <= cw; _x++)
+                {
+                    int x = gx + _x;
+                    auto get_vert = [&](int xd, int zd)
+                    {
+                        float y = get_px(x+xd, z+zd);
+                        return vec3(_x+xd, y, _z+zd);
+                    };
+                    verts.push_back(get_vert(0, 0));
+                    
+                    vec3 u = get_vert(0, 0-1);
+                    vec3 d = get_vert(0, 0+1);
+                    vec3 l = get_vert(0-1, 0);
+                    vec3 r = get_vert(0+1, 0);
+                    
+                    vec3 a = u-d;
+                    vec3 b = l-r;
+                    vec3 n = normalize(cross(a, b));
+                    normals.push_back(n);
+                }
+            }
+            for (int z = 0; z < cw; z++)
+            {
+                for (int x = 0; x < cw; x++)
+                {
+                    indices.push_back(z*(cw+1) + x);
+                    indices.push_back(z*(cw+1) + x + 1);
+                    indices.push_back(z*(cw+1) + x + 2 + cw);
+                    indices.push_back(z*(cw+1) + x);
+                    indices.push_back(z*(cw+1) + x + 2 + cw);
+                    indices.push_back(z*(cw+1) + x + 1 + cw);
+                }
+            }
             auto rm = std::make_shared<RenderableMesh>(vloc, nloc, verts, normals, indices, tx_grass);
             auto renderable = new Renderable(rm);
             renderable->xform = translate(renderable->xform, vec3(gx - hm_w/2, 0.0f, gz - hm_h/2));
@@ -702,28 +703,32 @@ int main()
         std::unordered_map<uint64_t, size_t> o_to_us;
         
         std::vector<std::string> lines;
-        size_t start = 0;
-        size_t end = 0;
-        while ((end = text.find('\n', start)) != (size_t)-1)
         {
-            lines.emplace_back(text.data() + start, end - start);
-            start = end + 1;
+            size_t start = 0;
+            size_t end = 0;
+            while ((end = text.find('\n', start)) != (size_t)-1)
+            {
+                lines.emplace_back(text.data() + start, end - start);
+                start = end + 1;
+            }
+            lines.emplace_back(text.data() + start, text.size() - start);
         }
-        lines.emplace_back(text.data() + start, text.size() - start);
         
         for (auto subrange : lines)
         {
             auto line = std::string(subrange.begin(), subrange.end());
             
             std::vector<std::string> tokens;
-            size_t start = 0;
-            size_t end = 0;
-            while ((end = line.find(' ', start)) != (size_t)-1)
             {
-                tokens.emplace_back(line.data() + start, end - start);
-                start = end + 1;
+                size_t start = 0;
+                size_t end = 0;
+                while ((end = line.find(' ', start)) != (size_t)-1)
+                {
+                    tokens.emplace_back(line.data() + start, end - start);
+                    start = end + 1;
+                }
+                tokens.emplace_back(line.data() + start, line.size() - start);
             }
-            tokens.emplace_back(line.data() + start, line.size() - start);
             
             if (tokens.size() <= 1) continue;
             auto tok = tokens[0];
@@ -745,14 +750,16 @@ int main()
                 auto to_indexes = [&](size_t i, uint64_t & a, uint64_t & b)
                 {
                     std::vector<std::string> subs;
-                    size_t start = 0;
-                    size_t end = 0;
-                    while ((end = tokens[i].find('/', start)) != (size_t)-1)
                     {
-                        subs.emplace_back(tokens[i].data() + start, end - start);
-                        start = end + 1;
+                        size_t start = 0;
+                        size_t end = 0;
+                        while ((end = tokens[i].find('/', start)) != (size_t)-1)
+                        {
+                            subs.emplace_back(tokens[i].data() + start, end - start);
+                            start = end + 1;
+                        }
+                        subs.emplace_back(tokens[i].data() + start, tokens[i].size() - start);
                     }
-                    subs.emplace_back(tokens[i].data() + start, tokens[i].size() - start);
                     
                     std::from_chars(subs[0].data(), subs[0].data() + subs[0].size(), a);
                     std::from_chars(subs[2].data(), subs[2].data() + subs[2].size(), b);
@@ -1273,9 +1280,9 @@ int main()
     
     auto event_pumper = [](void * userdata, SDL_Event * event) -> bool
     {
-        auto rerender = (std::function<void()> *)userdata;
+        auto rerender_ = (std::function<void()> *)userdata;
         if (event->type == SDL_EVENT_WINDOW_EXPOSED)
-            (*rerender)();
+            (*rerender_)();
         return true;
     };
     SDL_AddEventWatch((SDL_EventFilter)event_pumper, &rerender);
