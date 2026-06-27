@@ -234,7 +234,7 @@ public:
         auto id = new_id();
         Occluder occ;
         
-        float inf = 1.0f/0.0f;
+        float inf = std::numeric_limits<float>::infinity();
         Vec3 aabb_lo = Vec3(inf, inf, inf);
         Vec3 aabb_hi = Vec3(-inf, -inf, -inf);
         for (size_t i = 0; i < 4; i += 1)
